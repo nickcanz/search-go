@@ -84,7 +84,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	file, err := os.Open("goodreads_books.json")
+	file, err := os.Open("goodreads_books.1000.json")
 	if err != nil {
 		log.Fatal(err)
 	}

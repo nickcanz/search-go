@@ -1,4 +1,4 @@
-goodreads_books.json
+goodreads_books*.json
 /load-books
 /search-books
 .env
