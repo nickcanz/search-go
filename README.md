@@ -5,9 +5,11 @@ Our goal is to build a sample application in Go that uses Elasticsearch. For our
 
 For reference, I'm using go version 1.20.2. We plan to make two command line applications `load-books` and `search-books` to interact with the dataset and our Elasticsearch cluster.
 
+## TODO: Set up a cluster on bonsai.io
+
 ## Initializing the project
 
-Let's start a  from scratch
+Let's start an application from scratch
 
 ```bash
 go mod init github.com/nickcanz/search-go
@@ -329,7 +331,7 @@ green  open   books hB1w4JFFRYuFIxsFhzlV5Q   1   1       1000            0      
 
 And we see 1,000 documents in the index!
 
-
+## TODO: Searching the index
 
 
 ## References
