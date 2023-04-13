@@ -331,8 +331,243 @@ green  open   books hB1w4JFFRYuFIxsFhzlV5Q   1   1       1000            0      
 
 And we see 1,000 documents in the index!
 
-## TODO: Searching the index
+## Searching the index
 
+Now let's make a small program to search our index. We'll make a new directory to contain this program.
+
+```bash
+mkdir -p cmd/search-books
+touch cmd/search-books/main.go
+```
+
+Let's start this program with an example of how we can take user input. The contents of `cmd/search-books/main.go` will look like this:
+
+```go
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+)
+
+func main() {
+	queryPtr := flag.String("query", "", "Query to search for")
+	flag.Parse()
+
+	if *queryPtr == "" {
+		log.Fatalf("No query provided for -query parameter")
+	}
+
+	fmt.Printf("Searching books for: %s\n", *queryPtr)
+}
+```
+
+We can build and run our small program.
+
+```bash
+go build ./cmd/search-books
+
+# Pass our search term using the -query flag
+./search-books -query fantasy
+Searching books for: fantasy
+
+# Test the error case if we don't use -query
+./search-books
+2023/04/04 11:23:27 No query provided for -query parameter
+
+# Use quotes to pass a multi word query
+./search-books  -query "science fiction"
+Searching books for: science fiction
+```
+
+Now that we have a value we can search for, let's configure an Elasticsearch client and search.
+
+```go
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	elasticsearch7 "github.com/elastic/go-elasticsearch/v7"
+	"github.com/joho/godotenv"
+)
+
+type Book struct {
+	Title       string `json:"title"`
+	Url         string `json:"url"`
+	Description string `json:"description"`
+}
+
+type BookSearchResponse struct {
+	Took float64 `json:"took"`
+	Hits struct {
+		Hits []struct {
+			Book  Book    `json:"_source"`
+			Score float64 `json:"_score"`
+		} `json:"hits"`
+	} `json:"hits"`
+}
+
+func main() {
+	queryPtr := flag.String("query", "", "Query to search for")
+	flag.Parse()
+	if *queryPtr == "" {
+		log.Fatalf("No query provided for -query parameter")
+	}
+
+	fmt.Printf("Searching books for: %s\n", *queryPtr)
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	cfg := elasticsearch7.Config{
+		Addresses: []string{
+			os.Getenv("ES_URL"),
+		},
+		Username: os.Getenv("ES_USER"),
+		Password: os.Getenv("ES_PASSWORD"),
+	}
+
+	client, err := elasticsearch7.NewClient(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	query := fmt.Sprintf(` {
+	   "query": {
+	   	"multi_match":{
+		  "query":"%s",
+		  "fields": [ "title", "url", "description" ]
+		}
+	   },
+	   "size": 10
+	}`, *queryPtr)
+	resp, err := client.Search(
+		client.Search.WithIndex("books"),
+		client.Search.WithBody(strings.NewReader(query)))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.IsError() {
+		log.Fatalf("Error querying, status: %s, response body: %s", resp.Status(), resp.String())
+	}
+
+	var bookSearchResponse BookSearchResponse
+
+	err = json.NewDecoder(resp.Body).Decode(&bookSearchResponse)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, bookHit := range bookSearchResponse.Hits.Hits {
+		fmt.Printf("%s, %s with score of %f\n", bookHit.Book.Title, bookHit.Book.Url, bookHit.Score)
+	}
+}
+```
+
+Let's go over what we added. First, two structs to organize our data. We have our original `Book` struct that we used while indexing data and a `BookSearchResponse` struct. This struct matches the shape of JSON that is returned when we search Elasticsearch.
+
+```go
+type Book struct {
+	Title       string `json:"title"`
+	Url         string `json:"url"`
+	Description string `json:"description"`
+}
+
+type BookSearchResponse struct {
+	Took float64 `json:"took"`
+	Hits struct {
+		Hits []struct {
+			Book  Book    `json:"_source"`
+			Score float64 `json:"_score"`
+		} `json:"hits"`
+	} `json:"hits"`
+}
+```
+
+Within the `main` function, we're going to use `godotenv` to load up our configuration into environment variables.
+
+```go
+err := godotenv.Load()
+if err != nil {
+	log.Fatal("Error loading .env file")
+}
+```
+
+With our configuration loaded into env variables, we can configure our Elasticsearch client.
+
+```go
+cfg := elasticsearch7.Config{
+	Addresses: []string{
+		os.Getenv("ES_URL"),
+	},
+	Username: os.Getenv("ES_USER"),
+	Password: os.Getenv("ES_PASSWORD"),
+}
+
+client, err := elasticsearch7.NewClient(cfg)
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+With our search value loaded into the variable `*queryPtr`, we can make an Elasticsearch query using a [multi match query](https://www.elastic.co/guide/en/elasticsearch/reference/7.17/query-dsl-multi-match-query.html) on the title, url, and description fields that we indexed.
+
+```go
+query := fmt.Sprintf(` {
+   "query": {
+   	"multi_match":{
+	  "query":"%s",
+	  "fields": [ "title", "url", "description" ]
+	}
+   },
+   "size": 10
+}`, *queryPtr)
+```
+
+Using our Elasticsearch client, we send the query to Elasticsearch agains the `books` index.
+
+```go
+resp, err := client.Search(
+	client.Search.WithIndex("books"),
+	client.Search.WithBody(strings.NewReader(query)))
+```
+
+Now we can load the body of the response into the `BookSearchResponse` struct and read and output the results of the search.
+
+```go
+var bookSearchResponse BookSearchResponse
+
+err = json.NewDecoder(resp.Body).Decode(&bookSearchResponse)
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, bookHit := range bookSearchResponse.Hits.Hits {
+	fmt.Printf("%s, %s with score of %f\n", bookHit.Book.Title, bookHit.Book.Url, bookHit.Score)
+}
+```
+
+Running the search and looking for `dogs` we get the following results:
+
+```
+./search-books -query dogs
+Searching books for: dogs
+Dogs Don't Bite When a Growl Will Do: What Your Dog Can Teach You About Living a Happy Life, https://www.goodreads.com/book/show/38563.Dogs_Don_t_Bite_When_a_Growl_Will_Do with score of 8.593256
+Dog Heaven, https://www.goodreads.com/book/show/89378.Dog_Heaven with score of 5.433107
+One Cold Night (ARe Fearless #3), https://www.goodreads.com/book/show/30821261-one-cold-night with score of 4.815971
+A Nun Walks into a Bar (Nun-Fiction #1), https://www.goodreads.com/book/show/34507785-a-nun-walks-into-a-bar with score of 4.606666
+Home and Heart, https://www.goodreads.com/book/show/19407047-home-and-heart with score of 4.414797
+```
 
 ## References
 

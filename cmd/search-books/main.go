@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"strings"
 
@@ -30,9 +29,13 @@ type BookSearchResponse struct {
 }
 
 func main() {
-	fmt.Println("Hello from search-books")
 	queryPtr := flag.String("query", "", "Query to search for")
 	flag.Parse()
+	if *queryPtr == "" {
+		log.Fatalf("No query provided for -query parameter")
+	}
+
+	fmt.Printf("Searching books for: %s\n", *queryPtr)
 
 	err := godotenv.Load()
 	if err != nil {
@@ -51,7 +54,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	query := ` {
+	query := fmt.Sprintf(` {
 	   "query": {
 	   	"multi_match":{
 		  "query":"%s",
@@ -59,10 +62,10 @@ func main() {
 		}
 	   },
 	   "size": 10
-	}`
+	}`, *queryPtr)
 	resp, err := client.Search(
 		client.Search.WithIndex("books"),
-		client.Search.WithBody(strings.NewReader(fmt.Sprintf(query, url.QueryEscape(*queryPtr)))))
+		client.Search.WithBody(strings.NewReader(query)))
 	if err != nil {
 		log.Fatal(err)
 	}
