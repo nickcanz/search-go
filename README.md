@@ -1,11 +1,16 @@
-# search-go
-Example search application in go
+# search-go - Example search application in Go
 
 Our goal is to build a sample application in Go that uses Elasticsearch. For our data, we'll use the [Goodreads books dataset](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home)[^1].
 
-For reference, I'm using go version 1.20.2. We plan to make two command line applications `load-books` and `search-books` to interact with the dataset and our Elasticsearch cluster.
+For reference, I'm using Go version 1.20.2. We plan to make two command line applications `load-books` and `search-books` to interact with the dataset and our Elasticsearch cluster.
 
-## TODO: Set up a cluster on bonsai.io
+## Set up a cluster on bonsai.io
+
+Sign up for an account on bonsai.io to create a hosted Elasticsearch cluster. Navigate to https://app.bonsai.io/clusters/first_cluster to create your first cluster to create an Elasticsearch 7.10.2 cluster named "books-search".
+
+![cluster creation page on bonsai.io](./images/bonsai-first-cluster.png)
+
+Your cluster will get provisioned in AWS shortly. Once it's complete,
 
 ## Initializing the project
 
@@ -40,7 +45,9 @@ Hello from load-books
 
 ## Connecting to Elasticsearch
 
-We're now ready to connect to our Elasticsearch cluster. Let's put the necessary info from the `Credentials` page into environment variables via a `.env` file.
+We're now ready to connect to our Elasticsearch cluster. We need three pieces of information: the url, the access key, and the secret key.
+
+We can get all of this info from `Credentials` page of our cluster. We don't want to put this information directly into our code, so let's put the information into environment variables via a `.env` file.
 
 ```bash
 ES_URL=<base url>
@@ -48,7 +55,7 @@ ES_USER=<access key>
 ES_PASSWORD=<access secret>
 ```
 
-We can keep our cluster specific information in this `.env` to keep it separate from the code. Now we can connect to our Elasticsearch cluster.
+With the `.env` file populated, we can now directly connect to our Elasticsearch cluster from code. Let's modify `cmd/load-books/main.go` so that it looks like below.
 
 ```go
 package main
@@ -131,6 +138,8 @@ Hello from load-books
   "tagline" : "You Know, for Search"
 }
 ```
+
+We've successfully connected to our live cluster running on bonsai.io!
 
 ## Loading the dataset
 
@@ -330,6 +339,8 @@ green  open   books hB1w4JFFRYuFIxsFhzlV5Q   1   1       1000            0      
 ```
 
 And we see 1,000 documents in the index!
+
+![image from the bonsai.io console](./images/console-indices.png)
 
 ## Searching the index
 
