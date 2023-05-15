@@ -1,6 +1,6 @@
 # search-go - Example search application in Go
 
-Our goal is to build a sample application in Go that uses Elasticsearch. For our data, we'll use the [Goodreads books dataset](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home)[^1].
+Our goal is to build a sample application in Go that uses Elasticsearch 7.10.2. For our data, we'll use the [Goodreads books dataset](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home)[^1].
 
 For reference, I'm using Go version 1.20.2. We plan to make two command line applications `load-books` and `search-books` to interact with the dataset and our Elasticsearch cluster.
 
@@ -43,11 +43,11 @@ go build ./cmd/load-books
 Hello from load-books
 ```
 
-## Connecting to Elasticsearch
+## Connecting to Elasticsearch via the go-elasticsearch library
 
 We're now ready to connect to our Elasticsearch cluster. We need three pieces of information: the url, the access key, and the secret key.
 
-We can get all of this info from `Credentials` page of our cluster. We don't want to put this information directly into our code, so let's put the information into environment variables via a `.env` file.
+We can get all of this info from `Credentials` page of our cluster. We don't want to put this information directly into our code, so let's put the information into environment variables via a `.env` file that we can load in our application using an open source library [github.com/joho/godotenv](https://github.com/joho/godotenv).
 
 ```bash
 ES_URL=<base url>
@@ -55,7 +55,10 @@ ES_USER=<access key>
 ES_PASSWORD=<access secret>
 ```
 
-With the `.env` file populated, we can now directly connect to our Elasticsearch cluster from code. Let's modify `cmd/load-books/main.go` so that it looks like below.
+With the `.env` file populated, we can now directly connect to our Elasticsearch cluster from code using the official [go-elasticsearch](https://github.com/elastic/go-elasticsearch/tree/v7.10.0) library, making sure to use `v7.10.0` to match up with the version of Elasticsearch we're using.
+
+
+Let's modify `cmd/load-books/main.go` so that it looks like below.
 
 ```go
 package main
@@ -66,7 +69,7 @@ import (
 	"os"
 
 	elasticsearch7 "github.com/elastic/go-elasticsearch/v7"
-	"github.com/joho/godotenv"
+	"github.com/joho/godotenv" // A helper library to load the .env file
 )
 
 func main() {
@@ -99,7 +102,9 @@ func main() {
 }
 ```
 
-We can pull in our dependencies by running `go mod tidy`. In order to connect to our `v7.10` Elasticsearch cluster, we also need to use the `7.10` version of `go-elasticsearch`. Let's modify our `go.mod` file to reflect this
+We can pull in our dependencies by running `go mod tidy`. This command makes sure any references in our code is included in the `go.mod` file, [from the official Go documentation](https://go.dev/ref/mod#go-mod-tidy).
+
+In order to connect to our `v7.10` Elasticsearch cluster, we also need to use the `7.10` version of `go-elasticsearch`. Let's modify our `go.mod` file to reflect this
 
 ```go
 module github.com/nickcanz/search-go
@@ -579,6 +584,162 @@ One Cold Night (ARe Fearless #3), https://www.goodreads.com/book/show/30821261-o
 A Nun Walks into a Bar (Nun-Fiction #1), https://www.goodreads.com/book/show/34507785-a-nun-walks-into-a-bar with score of 4.606666
 Home and Heart, https://www.goodreads.com/book/show/19407047-home-and-heart with score of 4.414797
 ```
+
+## Tips on maintance and updating an index
+
+If our books application is a success and keeps growing, there might be some things that we want to change about the index structure. Let's go over some changes that can be done dynamically and some that will need a new index.
+
+### Dynamic index changes
+
+[There are a large number of index settings that be updated live via an API](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/indices-update-settings.html#update-index-settings-api-example). One of those is the number of _replica_ shards an index has. Increasing the number of replica shards will increase the amount of work your cluster does while writing documents, but will increase your redundancy against node failures and help spread out your write load. Our `books` index was created with the default 1 replica shard. Let's increase it to 2 replica shards.
+
+Let's use the bonsai.io console to first `GET` the index settings from the URL `/books/_settings`
+
+```json
+{
+  "books": {
+    "settings": {
+      "index": {
+        "number_of_shards": "1",
+        "auto_expand_replicas": null,
+        "provided_name": "books",
+        "creation_date": "1684120101937",
+        "priority": "0",
+        "number_of_replicas": "1",
+        "uuid": "NsgA3Ml_TI-0NXgc_Q2BRA",
+        "version": {
+          "created": "7100299"
+        }
+      }
+    }
+  }
+}
+```
+
+![console page showing index settings](./images/books-settings.png)
+
+We can issue a `PUT` request to the index to update the `number_of_replicas` setting.
+
+For our request body to `PUT /books/_settings`
+
+```json
+{
+  "index.number_of_replicas": 2
+}
+```
+
+The reponse is: 
+
+```json
+{
+  "acknowledged": true
+}
+```
+
+![console page showing a PUT request to books index](./images/books-put-settings.png)
+
+And we can issue another `GET` request to the settings page to show the updated setting:
+
+```json
+{
+  "books": {
+    "settings": {
+      "index": {
+        "number_of_shards": "1",
+        "auto_expand_replicas": null,
+        "provided_name": "books",
+        "creation_date": "1684120101937",
+        "priority": "0",
+        "number_of_replicas": "2",
+        "uuid": "NsgA3Ml_TI-0NXgc_Q2BRA",
+        "version": {
+          "created": "7100299"
+        }
+      }
+    }
+  }
+}
+```
+
+![books updated settings](./image/books-updated-settings.png)
+
+### Re-creating the index
+
+But not all settings are dynamic. For example, the `number_of_shards` setting has to be chosen at index creation time and can't be updated. Elastic recommends [shards be between 10 and 50 gigabytes in size](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/size-your-shards.html#shard-size-recommendation). As you add more data to your index and approach these limits, you will want to re-create your index with more shards.
+
+An easy way to do this within Elasticsearch is to use the [reindex API](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/docs-reindex.html).
+
+Let's first create an index with an updated shard count that we want to use.
+
+```
+PUT /books-2shards
+{
+  "settings": {
+    "number_of_shards": 2
+  },
+  "mappings": {
+    "properties": {
+      "title": {
+        "type": "text"
+      },
+      "url": {
+        "type": "text"
+      },
+      "description": {
+        "type": "text"
+      }
+    }
+  }
+}
+```
+
+![Creating the books-2shards index](./images/books-2shards.png)
+
+This new index has 2 shards instead of 1 that our books index has, but has all of the same mappings.
+
+By looking at the shard information via `GET /_cat/shards?v`, we see our books index has 1000 documents in the 1 primary and replica shards. Our books-2shards index has 2 primary and 2 replica shards, but zero documents in them yet.
+
+```
+index         shard prirep state   docs store ip            node
+books         0     p      STARTED 1000   1mb 172.31.83.32  ip-172-31-83-32
+books         0     r      STARTED 1000   1mb 172.31.18.222 ip-172-31-18-222
+books-2shards 1     r      STARTED    0  208b 172.31.83.32  ip-172-31-83-32
+books-2shards 1     p      STARTED    0  208b 172.31.18.222 ip-172-31-18-222
+books-2shards 0     r      STARTED    0  208b 172.31.44.58  ip-172-31-44-58
+books-2shards 0     p      STARTED    0  208b 172.31.83.32  ip-172-31-83-32
+```
+
+Using the [reindex API](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/docs-reindex.html), we can move all of the data from books to books-2shards.
+
+```
+POST /_reindex?wait_for_completion=false
+{
+  "source": {
+    "index": "books"
+  },
+  "dest": {
+    "index": "books-2shards"
+  }
+}
+```
+
+![reindex api output](./images/books-2shards-reindex.png)
+
+After a short period of time, we can check the shard stats again.
+
+```
+GET /_cat/shards?v
+index         shard prirep state   docs   store ip            node
+books         0     p      STARTED 1000     1mb 172.31.83.32  ip-172-31-83-32
+books         0     r      STARTED 1000     1mb 172.31.18.222 ip-172-31-18-222
+books-2shards 1     r      STARTED  483 561.1kb 172.31.83.32  ip-172-31-83-32
+books-2shards 1     p      STARTED  483 561.1kb 172.31.18.222 ip-172-31-18-222
+books-2shards 0     r      STARTED  517 575.8kb 172.31.44.58  ip-172-31-44-58
+books-2shards 0     p      STARTED  517 575.8kb 172.31.83.32  ip-172-31-83-32
+```
+
+We see the 1000 documents in the books index got reindexed into the books-2shards index. 517 documents to shards 0 and 483 documents to shards 1. Using the reindex API is a great way to make a new index to increase the shard count **and** copy over all of your existing data as well.
+
 
 ## References
 
