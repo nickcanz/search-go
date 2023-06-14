@@ -10,7 +10,7 @@ Sign up for an account on bonsai.io to create a hosted Elasticsearch cluster. Na
 
 ![cluster creation page on bonsai.io](./images/bonsai-first-cluster.png)
 
-Your cluster will get provisioned in AWS shortly. Once it's complete,
+Your cluster will get provisioned in AWS shortly. Once it's complete, ...?
 
 ## Initializing the project
 
@@ -49,8 +49,15 @@ We're now ready to connect to our Elasticsearch cluster. We need three pieces of
 
 We can get all of this info from `Credentials` page of our cluster. We don't want to put this information directly into our code, so let's put the information into environment variables via a `.env` file that we can load in our application using an open source library [github.com/joho/godotenv](https://github.com/joho/godotenv).
 
+Every Bonsai cluster is created with a unique URL designed for secure, authenticated access to an Elasticsearch cluster. This URL allows a wide array of platforms and application clients to communicate with Elasticsearch. This URL looks something like this:
+
+```https://a1b2c3d4e:5f6g7h8i9@somehost-1234567.region-x-y.bonsaisearch.net```
+
+The Authentication credentials (ex: a1b2c3d4e:5f6g7h8i9 from above) is a randomly-generated access key:secret pair. By default, you will need to include these credentials with every request to your cluster, otherwise Bonsai will return an `HTTP 401: Authorization required` message.
+
+Insert the following information in the `.env` file from your cluster's `Credentials`:
 ```bash
-ES_URL=<base url>
+ES_URL=<base url where you omit the access key:secret pair>
 ES_USER=<access key>
 ES_PASSWORD=<access secret>
 ```
